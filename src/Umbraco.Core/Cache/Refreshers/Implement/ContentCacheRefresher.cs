@@ -86,15 +86,16 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
         var idsRemoved = new HashSet<int>();
         IAppPolicyCache isolatedCache = AppCaches.IsolatedCaches.GetOrCreate<IContent>();
 
-        foreach (JsonPayload payload in payloads.Where(x => x.Id != default))
+        foreach (JsonPayload payload in payloads)
         {
-            // By INT Id
-            isolatedCache.Clear(RepositoryCacheKeys.GetKey<IContent, int>(payload.Id));
+            if (payload.Id != default)
+            {
+                // By INT Id
+                isolatedCache.Clear(RepositoryCacheKeys.GetKey<IContent, int>(payload.Id));
 
-            // By GUID Key
-            isolatedCache.Clear(RepositoryCacheKeys.GetKey<IContent, Guid?>(payload.Key));
-
-
+                // By GUID Key
+                isolatedCache.Clear(RepositoryCacheKeys.GetKey<IContent, Guid?>(payload.Key));
+            }
 
             // remove those that are in the branch
             if (payload.ChangeTypes.HasTypesAny(TreeChangeTypes.RefreshBranch | TreeChangeTypes.Remove))
@@ -115,7 +116,10 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
 
             HandleNavigation(payload);
             HandlePublishedAsync(payload, CancellationToken.None).GetAwaiter().GetResult();
-            _idKeyMap.ClearCache(payload.Id);
+            if (payload.Id != default)
+            {
+                _idKeyMap.ClearCache(payload.Id);
+            }
             if (payload.Key.HasValue)
             {
                 _idKeyMap.ClearCache(payload.Key.Value);
@@ -168,9 +172,20 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
                 var branchKeys = descendantsKeys.ToList();
                 branchKeys.Add(key);
 
-                foreach (Guid branchKey in branchKeys)
+                // If the branch is unpublished, we need to remove it from cache instead of refreshing it
+                if (IsBranchUnpublished(payload))
                 {
-                    _documentCacheService.RefreshMemoryCacheAsync(branchKey).GetAwaiter().GetResult();
+                    foreach (Guid branchKey in branchKeys)
+                    {
+                        _documentCacheService.RemoveFromMemoryCacheAsync(branchKey).GetAwaiter().GetResult();
+                    }
+                }
+                else
+                {
+                    foreach (Guid branchKey in branchKeys)
+                    {
+                        _documentCacheService.RefreshMemoryCacheAsync(branchKey).GetAwaiter().GetResult();
+                    }
                 }
             }
         }
@@ -184,6 +199,15 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
         {
             _documentCacheService.RemoveFromMemoryCacheAsync(key).GetAwaiter().GetResult();
         }
+    }
+
+    private bool IsBranchUnpublished(JsonPayload payload)
+    {
+        // If unpublished cultures has one or more values, but published cultures does not, this means that the branch is unpublished entirely
+        // And therefore should no longer be resolve-able from the cache, so we need to remove it instead.
+        // Otherwise, some culture is still published, so it should be resolve-able from cache, and published cultures should instead be used.
+        return payload.UnpublishedCultures is not null && payload.UnpublishedCultures.Length != 0 &&
+               (payload.PublishedCultures is null || payload.PublishedCultures.Length == 0);
     }
 
     private void HandleNavigation(JsonPayload payload)
@@ -240,7 +264,7 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
         // First creation
         if (ExistsInNavigation(content.Key) is false && ExistsInNavigationBin(content.Key) is false)
         {
-            _documentNavigationManagementService.Add(content.Key, GetParentKey(content), content.SortOrder);
+            _documentNavigationManagementService.Add(content.Key, content.ContentType.Key, GetParentKey(content), content.SortOrder);
             if (content.Trashed)
             {
                 // If created as trashed, move to bin
@@ -334,7 +358,7 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
         }
         if(payload.ChangeTypes.HasType(TreeChangeTypes.RefreshAll))
         {
-            _documentUrlService.RebuildAllUrlsAsync().GetAwaiter().GetResult(); //TODO make async
+            _documentUrlService.InitAsync(false, CancellationToken.None).GetAwaiter().GetResult(); //TODO make async
         }
 
         if(payload.ChangeTypes.HasType(TreeChangeTypes.RefreshNode))
@@ -368,16 +392,6 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
     // TODO (V14): Change into a record
     public class JsonPayload
     {
-        public JsonPayload()
-        { }
-
-        [Obsolete("Use the default constructor and property initializers.")]
-        public JsonPayload(int id, Guid? key, TreeChangeTypes changeTypes)
-        {
-            Id = id;
-            Key = key;
-            ChangeTypes = changeTypes;
-        }
 
         public int Id { get; init; }
 
@@ -386,6 +400,10 @@ public sealed class ContentCacheRefresher : PayloadCacheRefresherBase<ContentCac
         public TreeChangeTypes ChangeTypes { get; init; }
 
         public bool Blueprint { get; init; }
+
+        public string[]? PublishedCultures { get; init; }
+
+        public string[]? UnpublishedCultures { get; init; }
     }
 
     #endregion

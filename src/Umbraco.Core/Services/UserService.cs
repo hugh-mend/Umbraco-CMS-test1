@@ -1,12 +1,11 @@
 using System.ComponentModel.DataAnnotations;
-using System.Globalization;
 using System.Linq.Expressions;
-using Microsoft.Extensions.DependencyInjection;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Umbraco.Cms.Core.Cache;
 using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.DependencyInjection;
 using Umbraco.Cms.Core.Editors;
@@ -35,11 +34,10 @@ namespace Umbraco.Cms.Core.Services;
 ///     Represents the UserService, which is an easy access to operations involving <see cref="IProfile" />,
 ///     <see cref="IMembershipUser" /> and eventually Backoffice Users.
 /// </summary>
-internal class UserService : RepositoryService, IUserService
+internal partial class UserService : RepositoryService, IUserService
 {
     private readonly GlobalSettings _globalSettings;
     private readonly SecuritySettings _securitySettings;
-    private readonly ILogger<UserService> _logger;
     private readonly IUserGroupRepository _userGroupRepository;
     private readonly UserEditorAuthorizationHelper _userEditorAuthorizationHelper;
     private readonly IServiceScopeFactory _serviceScopeFactory;
@@ -136,7 +134,6 @@ internal class UserService : RepositoryService, IUserService
         _globalSettings = globalSettings.Value;
         _securitySettings = securitySettings.Value;
         _contentSettings = contentSettings.Value;
-        _logger = loggerFactory.CreateLogger<UserService>();
     }
 
     /// <summary>
@@ -477,6 +474,7 @@ internal class UserService : RepositoryService, IUserService
     ///     This is just the default user group that the membership provider will use
     /// </summary>
     /// <returns></returns>
+    [Obsolete("No (backend) code path is using this anymore, so it can not be considered the default. Planned for removal in V16.")]
     public string GetDefaultMemberType() => Constants.Security.WriterGroupAlias;
 
     /// <summary>
@@ -915,7 +913,7 @@ internal class UserService : RepositoryService, IUserService
         {
             return UserOperationStatus.UserNameIsNotEmail;
         }
-        if (!IsEmailValid(model.Email))
+        if (model.Email.IsEmail() is false)
         {
             return UserOperationStatus.InvalidEmail;
         }
@@ -962,6 +960,15 @@ internal class UserService : RepositoryService, IUserService
         {
             scope.Complete();
             return Attempt.FailWithStatus<IUser?, UserOperationStatus>(UserOperationStatus.MissingUser, existingUser);
+        }
+
+        // User names can only contain the configured allowed characters. This is validated by ASP.NET Identity on create
+        // as the setting is applied to the BackOfficeIdentityOptions, but we need to check ourselves for updates.
+        var allowedUserNameCharacters = _securitySettings.AllowedUserNameCharacters;
+        if (model.UserName.Any(c => allowedUserNameCharacters.Contains(c) == false))
+        {
+            scope.Complete();
+            return Attempt.FailWithStatus<IUser?, UserOperationStatus>(UserOperationStatus.InvalidUserName, existingUser);
         }
 
         IEnumerable<IUserGroup> allUserGroups = _userGroupRepository.GetMany().ToArray();
@@ -1134,7 +1141,7 @@ internal class UserService : RepositoryService, IUserService
             return UserOperationStatus.UserNameIsNotEmail;
         }
 
-        if (IsEmailValid(model.Email) is false)
+        if (model.Email.IsEmail() is false)
         {
             return UserOperationStatus.InvalidEmail;
         }
@@ -1161,8 +1168,6 @@ internal class UserService : RepositoryService, IUserService
 
         return UserOperationStatus.Success;
     }
-
-    private static bool IsEmailValid(string email) => new EmailAddressAttribute().IsValid(email);
 
     private List<int>? GetIdsFromKeys(IEnumerable<Guid>? guids, UmbracoObjectTypes type)
     {
@@ -2483,6 +2488,11 @@ internal class UserService : RepositoryService, IUserService
 
     public async Task<UserClientCredentialsOperationStatus> AddClientIdAsync(Guid userKey, string clientId)
     {
+        if (ValidClientId().IsMatch(clientId) is false)
+        {
+            return UserClientCredentialsOperationStatus.InvalidClientId;
+        }
+
         using ICoreScope scope = ScopeProvider.CreateCoreScope(autoComplete: true);
 
         IEnumerable<string> currentClientIds = _userRepository.GetAllClientIds();
@@ -2669,6 +2679,9 @@ internal class UserService : RepositoryService, IUserService
             assignedPermissions.Add(additionalPermission);
         }
     }
+
+    [GeneratedRegex(@"^[\w\d\-\._~]{1,100}$")]
+    private static partial Regex ValidClientId();
 
     #endregion
 }

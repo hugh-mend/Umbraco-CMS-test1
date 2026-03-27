@@ -6,6 +6,7 @@ using Umbraco.Cms.Core.Models;
 using Umbraco.Cms.Core.Models.ContentPublishing;
 using Umbraco.Cms.Core.Models.PublishedContent;
 using Umbraco.Cms.Core.PublishedCache;
+using Umbraco.Cms.Core.Routing;
 using Umbraco.Cms.Core.Scoping;
 using Umbraco.Cms.Core.Services;
 using Umbraco.Cms.Core.Services.Navigation;
@@ -75,12 +76,6 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
             IsDraft = false,
         };
 
-        _mockedNucacheRepository.Setup(r => r.GetContentSourceAsync(It.IsAny<int>(), true))
-            .ReturnsAsync(draftTestCacheNode);
-
-        _mockedNucacheRepository.Setup(r => r.GetContentSourceAsync(It.IsAny<int>(), false))
-            .ReturnsAsync(publishedTestCacheNode);
-
         _mockedNucacheRepository.Setup(r => r.GetContentSourceAsync(It.IsAny<Guid>(), true))
             .ReturnsAsync(draftTestCacheNode);
 
@@ -94,8 +89,9 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
             });
 
         _mockedNucacheRepository.Setup(r => r.DeleteContentItemAsync(It.IsAny<int>()));
-        var optionsMonitorMock = new Mock<IOptionsMonitor<CacheEntrySettings>>();
-        optionsMonitorMock.Setup(x => x.Get(It.IsAny<string>())).Returns(new CacheEntrySettings());
+
+        var mockedPublishedStatusService = new Mock<IPublishStatusQueryService>();
+        mockedPublishedStatusService.Setup(x => x.IsDocumentPublishedInAnyCulture(It.IsAny<Guid>())).Returns(true);
 
         _mockDocumentCacheService = new DocumentCacheService(
             _mockedNucacheRepository.Object,
@@ -104,17 +100,23 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
             GetRequiredService<Microsoft.Extensions.Caching.Hybrid.HybridCache>(),
             GetRequiredService<IPublishedContentFactory>(),
             GetRequiredService<ICacheNodeFactory>(),
-            GetSeedProviders(),
-            optionsMonitorMock.Object,
+            GetSeedProviders(mockedPublishedStatusService.Object),
+            new OptionsWrapper<CacheSettings>(new CacheSettings()),
             GetRequiredService<IPublishedModelFactory>(),
-            GetRequiredService<IPreviewService>());
+            GetRequiredService<IPreviewService>(),
+            mockedPublishedStatusService.Object,
+            GetRequiredService<IDocumentNavigationQueryService>());
 
-        _mockedCache = new DocumentCache(_mockDocumentCacheService, GetRequiredService<IPublishedContentTypeCache>());
+        _mockedCache = new DocumentCache(_mockDocumentCacheService,
+            GetRequiredService<IPublishedContentTypeCache>(),
+            GetRequiredService<IDocumentNavigationQueryService>(),
+            GetRequiredService<IDocumentUrlService>(),
+            new Lazy<IPublishedUrlProvider>(GetRequiredService<IPublishedUrlProvider>));
     }
 
     // We want to be able to alter the settings for the providers AFTER the test has started
     // So we'll manually create them with a magic options mock.
-    private IEnumerable<IDocumentSeedKeyProvider> GetSeedProviders()
+    private IEnumerable<IDocumentSeedKeyProvider> GetSeedProviders(IPublishStatusQueryService publishStatusQueryService)
     {
         _cacheSettings = new CacheSettings();
         _cacheSettings.DocumentBreadthFirstSeedCount = 0;
@@ -124,8 +126,8 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
 
         return new List<IDocumentSeedKeyProvider>
         {
-            new ContentTypeSeedKeyProvider(GetRequiredService<ICoreScopeProvider>(), GetRequiredService<IDatabaseCacheRepository>(), mock.Object),
-            new DocumentBreadthFirstKeyProvider(GetRequiredService<IDocumentNavigationQueryService>(), mock.Object),
+            new ContentTypeSeedKeyProvider(GetRequiredService<ICoreScopeProvider>(), GetRequiredService<IDatabaseCacheRepository>(), mock.Object, publishStatusQueryService),
+            new DocumentBreadthFirstKeyProvider(GetRequiredService<IDocumentNavigationQueryService>(), mock.Object, publishStatusQueryService),
         };
     }
 
@@ -150,7 +152,7 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
         var textPage2 = await _mockedCache.GetByIdAsync(Textpage.Id, true);
         AssertTextPage(textPage);
         AssertTextPage(textPage2);
-        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<int>(), It.IsAny<bool>()), Times.Exactly(1));
+        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Exactly(1));
     }
 
     [Test]
@@ -168,10 +170,12 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
 
         _cacheSettings.ContentTypeKeys = [ Textpage.ContentType.Key ];
         await _mockDocumentCacheService.SeedAsync(CancellationToken.None);
+        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Exactly(1));
+
         var textPage = await _mockedCache.GetByIdAsync(Textpage.Id);
         AssertTextPage(textPage);
 
-        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<int>(), It.IsAny<bool>()), Times.Exactly(0));
+        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Exactly(1));
     }
 
     [Test]
@@ -189,10 +193,11 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
 
         _cacheSettings.ContentTypeKeys = [ Textpage.ContentType.Key ];
         await _mockDocumentCacheService.SeedAsync(CancellationToken.None);
+        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Exactly(1));
         var textPage = await _mockedCache.GetByIdAsync(Textpage.Key);
         AssertTextPage(textPage);
 
-        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<int>(), It.IsAny<bool>()), Times.Exactly(0));
+        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Exactly(1));
     }
 
     [Test]
@@ -206,7 +211,7 @@ public class DocumentHybridCacheMockTests : UmbracoIntegrationTestWithContent
         var textPage = await _mockedCache.GetByIdAsync(Textpage.Id, true);
         AssertTextPage(textPage);
 
-        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<int>(), It.IsAny<bool>()), Times.Exactly(1));
+        _mockedNucacheRepository.Verify(x => x.GetContentSourceAsync(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Exactly(1));
     }
 
     [Test]

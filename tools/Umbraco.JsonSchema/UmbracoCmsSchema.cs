@@ -1,5 +1,6 @@
 using Umbraco.Cms.Core.Configuration;
 using Umbraco.Cms.Core.Configuration.Models;
+using Umbraco.Cms.Core.Models;
 
 internal class UmbracoCmsSchema
 {
@@ -72,12 +73,25 @@ internal class UmbracoCmsSchema
 
         public required HelpPageSettings HelpPage { get; set; }
 
-        public required InstallDefaultDataSettings DefaultDataCreation { get; set; }
+        public required InstallDefaultDataNamedOptions InstallDefaultData { get; set; }
 
         public required DataTypesSettings DataTypes { get; set; }
 
         public required MarketplaceSettings Marketplace { get; set; }
 
         public required WebhookSettings Webhook { get; set; }
+
+        public required CacheSettings Cache { get; set; }
+    }
+
+    public class InstallDefaultDataNamedOptions
+    {
+        public required InstallDefaultDataSettings Languages { get; set; }
+
+        public required InstallDefaultDataSettings DataTypes { get; set; }
+
+        public required InstallDefaultDataSettings MediaTypes { get; set; }
+
+        public required InstallDefaultDataSettings MemberTypes { get; set; }
     }
 }

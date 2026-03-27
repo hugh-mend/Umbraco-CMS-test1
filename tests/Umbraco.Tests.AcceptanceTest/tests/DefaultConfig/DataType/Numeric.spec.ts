@@ -18,8 +18,7 @@ test.afterEach(async ({umbracoApi}) => {
   }
 });
 
-// TODO: unskip when fixed, currently flaky
-test.skip('can update minimum value', async ({umbracoApi, umbracoUi}) => {
+test('can update minimum value', async ({umbracoApi, umbracoUi}) => {
   // Arrange
   const minimumValue = -5;
   const expectedDataTypeValues = {
@@ -78,7 +77,7 @@ test.skip('can allow decimals', async ({umbracoApi, umbracoUi}) => {
   };
 
   // Act
-  await umbracoUi.dataType.clickAllowDecimalsSlider();
+  await umbracoUi.dataType.clickAllowDecimalsToggle();
   await umbracoUi.dataType.clickSaveButton();
 
   // Assert

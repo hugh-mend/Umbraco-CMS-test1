@@ -2,6 +2,7 @@
 // See LICENSE for more details.
 
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -56,16 +57,17 @@ public static class StringExtensions
     /// <returns></returns>
     public static int[] GetIdsFromPathReversed(this string path)
     {
-        var nodeIds = path.Split(Constants.CharArrays.Comma, StringSplitOptions.RemoveEmptyEntries)
-            .Select(x =>
-                int.TryParse(x, NumberStyles.Integer, CultureInfo.InvariantCulture, out var output)
-                    ? Attempt<int>.Succeed(output)
-                    : Attempt<int>.Fail())
-            .Where(x => x.Success)
-            .Select(x => x.Result)
-            .Reverse()
-            .ToArray();
-        return nodeIds;
+        string[] pathSegments = path.Split(Constants.CharArrays.Comma, StringSplitOptions.RemoveEmptyEntries);
+        List<int> nodeIds = new(pathSegments.Length);
+        for (int i = pathSegments.Length - 1; i >= 0; i--)
+        {
+            if (int.TryParse(pathSegments[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out int pathSegment))
+            {
+                nodeIds.Add(pathSegment);
+            }
+        }
+
+        return nodeIds.ToArray();
     }
 
     /// <summary>
@@ -78,7 +80,7 @@ public static class StringExtensions
     public static string StripFileExtension(this string fileName)
     {
         // filenames cannot contain line breaks
-        if (fileName.Contains(Environment.NewLine) || fileName.Contains("\r") || fileName.Contains("\n"))
+        if (fileName.Contains('\n') || fileName.Contains('\r'))
         {
             return fileName;
         }
@@ -287,14 +289,14 @@ public static class StringExtensions
     /// <param name="value">The value.</param>
     /// <param name="forRemoving">For removing.</param>
     /// <returns></returns>
-    public static string TrimExact(this string value, string forRemoving)
+    public static string Trim(this string value, string forRemoving)
     {
         if (string.IsNullOrEmpty(value))
         {
             return value;
         }
 
-        return value.TrimEndExact(forRemoving).TrimStartExact(forRemoving);
+        return value.TrimEnd(forRemoving).TrimStart(forRemoving);
     }
 
     public static string EncodeJsString(this string s)
@@ -343,7 +345,7 @@ public static class StringExtensions
         return sb.ToString();
     }
 
-    public static string TrimEndExact(this string value, string forRemoving)
+    public static string TrimEnd(this string value, string forRemoving)
     {
         if (string.IsNullOrEmpty(value))
         {
@@ -363,7 +365,7 @@ public static class StringExtensions
         return value;
     }
 
-    public static string TrimStartExact(this string value, string forRemoving)
+    public static string TrimStart(this string value, string forRemoving)
     {
         if (string.IsNullOrEmpty(value))
         {
@@ -390,7 +392,7 @@ public static class StringExtensions
             return input;
         }
 
-        return toStartWith + input.TrimStartExact(toStartWith);
+        return toStartWith + input.TrimStart(toStartWith);
     }
 
     public static string EnsureStartsWith(this string input, char value) =>
@@ -433,8 +435,7 @@ public static class StringExtensions
     {
         var delimiters = new[] { delimiter };
         return !list.IsNullOrWhiteSpace()
-            ? list.Split(delimiters, StringSplitOptions.RemoveEmptyEntries)
-                .Select(i => i.Trim())
+            ? list.Split(delimiters, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList()
             : new List<string>();
     }
@@ -616,7 +617,7 @@ public static class StringExtensions
         compare.EndsWith(compareTo, StringComparison.InvariantCultureIgnoreCase);
 
     public static bool InvariantContains(this string compare, string compareTo) =>
-        compare.IndexOf(compareTo, StringComparison.OrdinalIgnoreCase) >= 0;
+        compare.Contains(compareTo, StringComparison.OrdinalIgnoreCase);
 
     public static bool InvariantContains(this IEnumerable<string> compare, string compareTo) =>
         compare.Contains(compareTo, StringComparer.InvariantCultureIgnoreCase);
@@ -1557,6 +1558,14 @@ public static class StringExtensions
 
         yield return sb.ToString();
     }
+
+    /// <summary>
+    ///     Checks whether a string is a valid email address.
+    /// </summary>
+    /// <param name="email">The string check</param>
+    /// <returns>Returns a bool indicating whether the string is an email address.</returns>
+    public static bool IsEmail(this string? email) =>
+        string.IsNullOrWhiteSpace(email) is false && new EmailAddressAttribute().IsValid(email);
 
     // having benchmarked various solutions (incl. for/foreach, split and LINQ based ones),
     // this is by far the fastest way to find string needles in a string haystack

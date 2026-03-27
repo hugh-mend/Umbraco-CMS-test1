@@ -46,6 +46,7 @@ using Umbraco.Cms.Infrastructure.HealthChecks;
 using Umbraco.Cms.Infrastructure.HostedServices;
 using Umbraco.Cms.Infrastructure.Install;
 using Umbraco.Cms.Infrastructure.Mail;
+using Umbraco.Cms.Infrastructure.Mail.Interfaces;
 using Umbraco.Cms.Infrastructure.Manifest;
 using Umbraco.Cms.Infrastructure.Migrations;
 using Umbraco.Cms.Infrastructure.Migrations.Install;
@@ -123,6 +124,7 @@ public static partial class UmbracoBuilderExtensions
 
         builder.Services.AddSingleton<IJsonSerializer, SystemTextJsonSerializer>();
         builder.Services.AddSingleton<IConfigurationEditorJsonSerializer, SystemTextConfigurationEditorJsonSerializer>();
+        builder.Services.AddUnique<IWebhookJsonSerializer, SystemTextWebhookJsonSerializer>();
 
         // register database builder
         // *not* a singleton, don't want to keep it around
@@ -172,14 +174,18 @@ public static partial class UmbracoBuilderExtensions
 
         builder.Services.AddSingleton<IContentLastChanceFinder, ContentFinderByConfigured404>();
 
+        builder.Services.AddTransient<IEmailSenderClient, BasicSmtpEmailSenderClient>();
+
         // replace
         builder.Services.AddSingleton<IEmailSender, EmailSender>(
             services => new EmailSender(
                 services.GetRequiredService<ILogger<EmailSender>>(),
                 services.GetRequiredService<IOptionsMonitor<GlobalSettings>>(),
                 services.GetRequiredService<IEventAggregator>(),
+                services.GetRequiredService<IEmailSenderClient>(),
                 services.GetService<INotificationHandler<SendEmailNotification>>(),
                 services.GetService<INotificationAsyncHandler<SendEmailNotification>>()));
+
         builder.Services.AddTransient<IUserInviteSender, EmailUserInviteSender>();
         builder.Services.AddTransient<IUserForgotPasswordSender, EmailUserForgotPasswordSender>();
 
@@ -321,7 +327,6 @@ public static partial class UmbracoBuilderExtensions
             .AddNotificationHandler<ContentMovedToRecycleBinNotification, UserNotificationsHandler>()
             .AddNotificationHandler<ContentCopiedNotification, UserNotificationsHandler>()
             .AddNotificationHandler<ContentRolledBackNotification, UserNotificationsHandler>()
-            .AddNotificationHandler<ContentSentToPublishNotification, UserNotificationsHandler>()
             .AddNotificationHandler<ContentUnpublishedNotification, UserNotificationsHandler>()
             .AddNotificationHandler<AssignedUserGroupPermissionsNotification, UserNotificationsHandler>()
             .AddNotificationHandler<PublicAccessEntrySavedNotification, UserNotificationsHandler>();
@@ -406,8 +411,8 @@ public static partial class UmbracoBuilderExtensions
             .AddNotificationHandler<AssignedUserGroupPermissionsNotification, AuditNotificationsHandler>();
 
         // Handlers for publish warnings
-        builder
-            .AddNotificationHandler<ContentPublishedNotification, AddDomainWarningsWhenPublishingNotificationHandler>();
+        builder.AddNotificationHandler<ContentPublishedNotification, AddDomainWarningsWhenPublishingNotificationHandler>();
+        builder.AddNotificationAsyncHandler<ContentPublishedNotification, AddUnroutableContentWarningsWhenPublishingNotificationHandler>();
 
         // Handlers for save warnings
         builder
@@ -433,6 +438,7 @@ public static partial class UmbracoBuilderExtensions
         builder.Services.AddSingleton<IRequestRedirectService, NoopRequestRedirectService>();
         builder.Services.AddSingleton<IRequestPreviewService, NoopRequestPreviewService>();
         builder.Services.AddSingleton<IRequestMemberAccessService, NoopRequestMemberAccessService>();
+        builder.Services.AddTransient<ICurrentMemberClaimsProvider, NoopCurrentMemberClaimsProvider>();
         builder.Services.AddSingleton<IApiAccessService, NoopApiAccessService>();
         builder.Services.AddSingleton<IApiContentQueryService, NoopApiContentQueryService>();
         builder.Services.AddSingleton<IApiMediaQueryService, NoopApiMediaQueryService>();
@@ -444,6 +450,7 @@ public static partial class UmbracoBuilderExtensions
         builder.Services.AddSingleton<IApiRichTextElementParser, ApiRichTextElementParser>();
         builder.Services.AddSingleton<IApiRichTextMarkupParser, ApiRichTextMarkupParser>();
         builder.Services.AddSingleton<IApiPropertyRenderer, ApiPropertyRenderer>();
+        builder.Services.AddSingleton<IApiDocumentUrlService, ApiDocumentUrlService>();
 
         return builder;
     }
